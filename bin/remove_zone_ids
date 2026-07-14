@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Remove Windows/WSL Zone.Identifier files from a project directory.
+#
+# Usage: remove_zone_ids [directory]
+#   directory defaults to the current directory.
+
+target_dir="${1:-.}"
+
+if [[ ! -d "$target_dir" ]]; then
+  echo "Error: '$target_dir' is not a directory" >&2
+  exit 1
+fi
+
+mapfile -d '' -t files < <(find "$target_dir" -type f -name '*Zone.Identifier' -print0)
+
+if [[ ${#files[@]} -eq 0 ]]; then
+  echo "No Zone.Identifier files found under $target_dir"
+  exit 0
+fi
+
+for f in "${files[@]}"; do
+  rm -f -- "$f"
+  echo "Removed: $f"
+done
+
+echo "Removed ${#files[@]} Zone.Identifier file(s)."

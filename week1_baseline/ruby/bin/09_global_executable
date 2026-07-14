@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+cd "$(dirname "$0")/../09_global_executable"
+bundle exec ruby examples/example.rb

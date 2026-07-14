@@ -1,0 +1,184 @@
+module Boukensha
+  # Repl is the interactive session loop.
+  #
+  # It wraps the same primitives as a single Boukensha.run call, but instead of
+  # running once it stays alive: it reads a task from the user, runs the agent,
+  # prints the reply, and loops back to the prompt.
+  #
+  # The Context is shared across every turn so conversation history accumulates
+  # naturally — the agent sees the full transcript each time it is called.
+  #
+  # Built-in commands (not sent to the agent):
+  #   /help    print the command list
+  #   /clear   wipe conversation history (tools stay registered)
+  #   /exit    leave the REPL
+  #   /quit    alias for /exit
+  class Repl
+    PROMPT = "boukensha> "
+
+    HELP = <<~HELP
+      Commands:
+        /clear   wipe conversation history (tools stay)
+        /exit    leave the REPL
+        /help    show this message
+    HELP
+
+    attr_reader :logger, :context, :model, :version
+
+    def initialize(context:, registry:, builder:, client:, logger:, config_dir: nil, provider: nil, model: nil, version: nil, api_key: nil, mud: nil, task_settings: nil, max_iterations: nil, max_output_tokens: nil)
+      @context    = context
+      @registry   = registry
+      @builder    = builder
+      @client     = client
+      @logger     = logger
+      @task_settings     = task_settings
+      @max_iterations    = max_iterations
+      @max_output_tokens = max_output_tokens
+      @config_dir = config_dir
+      @provider   = provider
+      @model      = model
+      @version    = version
+      @api_key    = api_key
+      @mud        = mud
+      @turn       = 0
+      @output_cb  = nil
+    end
+
+    # Register a callback that receives every string the REPL would otherwise
+    # print to stdout.  When set, puts/print are suppressed entirely and all
+    # output is routed through the callback instead.  Used by Tui.
+    def on_output(&block)
+      @output_cb = block
+    end
+
+    def banner
+      key_status    = (@api_key.nil? || @api_key.strip.empty?) ? "✗ API key not set" : "✓ API key set"
+      provider_line = "#{@provider || "default"} (#{@model || "default"})  #{key_status}"
+      config_exists = @config_dir && Dir.exist?(@config_dir)
+      config_line   = config_exists ? @config_dir : "#{@config_dir || "(default)"}  ✗ directory not found"
+      ver           = @version || "?.?.?"
+      mud_stat      = mud_status_string
+
+      <<~BANNER
+
+        ╔══════════════════════════════════════╗
+        ║  BOUKENSHA MUD Assistant (v#{ver})#{" " * (9 - ver.length)}║
+        ╚══════════════════════════════════════╝
+          config:    #{config_line}
+          provider:  #{provider_line}
+          mud:       #{mud_stat}
+
+          /clear           reset conversation history
+          /exit or /quit    leave the REPL
+
+      BANNER
+    end
+
+    # Handle a slash command.  Returns :quit, :command, or nil (not a command).
+    # Output is routed through the registered on_output callback if present.
+    def handle_command(input)
+      case input
+      when "/exit", "/quit"
+        output("Goodbye.")
+        :quit
+      when "/help"
+        output(HELP)
+        :command
+      when "/clear"
+        @context.clear_messages!
+        @turn = 0
+        output("(conversation history cleared)")
+        :command
+      end
+    end
+
+    def run_turn(input)
+      @turn += 1
+      @logger.turn(n: @turn)
+
+      @context.add_message(:user, input)
+
+      agent  = Agent.new(
+        context:  @context,
+        registry: @registry,
+        builder:  @builder,
+        client:   @client,
+        logger:   @logger,
+        task_settings: @task_settings,
+        max_iterations:    @max_iterations,
+        max_output_tokens: @max_output_tokens
+      )
+      result = agent.run
+
+      output("")
+      output(result)
+    rescue LoopError => e
+      output("\n[error] #{e.message}")
+    rescue ApiError => e
+      output("\n[error] API call failed: #{e.message}")
+    end
+
+    def start
+      output(banner)
+      loop do
+        unless @output_cb
+          print PROMPT
+          $stdout.flush
+        end
+
+        input = $stdin.gets
+        break unless input  # EOF / Ctrl-D
+
+        input = input.chomp.strip
+        next if input.empty?
+
+        result = handle_command(input)
+        break if result == :quit
+        next  if result
+
+        run_turn(input)
+      end
+    end
+
+    private
+
+    def output(str)
+      if @output_cb
+        @output_cb.call(str.to_s)
+      else
+        puts str
+      end
+    end
+
+    # Build the mud status string shown in the banner.
+    # Only checks TCP reachability — the tool session auto-connects at startup
+    # (in Mud.register), so probing login here would cause a double-login.
+    def mud_status_string
+      return "(not configured)" unless @mud
+
+      host     = @mud[:host] || "localhost"
+      port     = @mud[:port] || 4000
+      name     = @mud[:name]
+      password = @mud[:password]
+
+      "#{host}:#{port}  #{probe_mud(host, port, name, password)}"
+    end
+
+    def probe_mud(host, port, name, password)
+      require "socket"
+      require "timeout"
+
+      # TCP reachability only — the tool session auto-connects at startup,
+      # so we don't probe login here (that would cause a double-login on boot).
+      begin
+        Timeout.timeout(3) { TCPSocket.new(host, port).close }
+      rescue StandardError
+        return "✗ not reachable"
+      end
+
+      name && !name.to_s.strip.empty? ? "(Reachable)" : "(Reachable, no credentials)"
+    rescue StandardError => e
+      "✗ probe error: #{e.message}"
+    end
+  end
+end
