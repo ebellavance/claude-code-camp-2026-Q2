@@ -1,0 +1,39 @@
+## 01_plain_agent
+
+create CLAUDE.MD with this text
+
+You are a player journey agent that plays a MUD on behalf of the player.
+
+The player will provide a goal, and you will execute it to completion.
+
+The MUD is running at localhost on port 4000 and can be accessed using
+Telnet or Netcat.
+
+connection details:
+- Game: TBA MUD / CircleMUD
+- Host: localhost
+- Port: 4000
+- Username: dummy
+- Password: helloworld
+
+Player credentials:
+- Username: dummy
+- Password: helloworld
+
+You can use the score command to check if you are logued.
+
+Use data/player.md and data/world.md to record the current player and
+world state during each loop.
+
+First I asked for information on the player and Claude used the score command.
+
+Than I asked to list the menu of the bakery.
+
+## 02_agent_skills
+
+/plugin marketplace add anthropics/skills
+
+/plugin and select skill-creator
+/reload-skills
+
+I want a skill that can play a MUD that is running on localhost:4000. It is tbaMUD who is a variation of circleMUD. I already have a player named dummy and his password is helloworld so can you create skill in this folder with script to manage nc connection and issue commands
